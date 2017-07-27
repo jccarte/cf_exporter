@@ -15,6 +15,7 @@ type ApplicationsCollector struct {
 	cfClient                                    *cfclient.Client
 	applicationInfoMetric                       *prometheus.GaugeVec
 	applicationInstancesMetric                  *prometheus.GaugeVec
+	applicationRunningInstancesMetric           *prometheus.GaugeVec
 	applicationMemoryMbMetric                   *prometheus.GaugeVec
 	applicationDiskQuotaMbMetric                *prometheus.GaugeVec
 	applicationsScrapesTotalMetric              prometheus.Counter
@@ -50,6 +51,17 @@ func NewApplicationsCollector(
 			ConstLabels: prometheus.Labels{"environment": environment, "deployment": deployment},
 		},
 		[]string{"application_id", "application_name", "organization_id", "organization_name", "space_id", "space_name"},
+	)
+
+	applicationRunningInstancesMetric := prometheus.NewGaugeVec(
+	  prometheus.GaugeOpts{
+			Namespace:   namespace,
+			Subsystem:   "application",
+			Name:        "running_instances",
+			Help:        "Labeled Cloud Foundry Application Running Instances.",
+			ConstLabels: prometheus.Labels{"environment": environment, "deployment": deployment},
+		},
+		[]string{"application_id", "application_name", "state"},
 	)
 
 	applicationMemoryMbMetric := prometheus.NewGaugeVec(
@@ -131,6 +143,7 @@ func NewApplicationsCollector(
 		cfClient:                                    cfClient,
 		applicationInfoMetric:                       applicationInfoMetric,
 		applicationInstancesMetric:                  applicationInstancesMetric,
+		applicationRunningInstancesMetric:           applicationRunningInstancesMetric,
 		applicationMemoryMbMetric:                   applicationMemoryMbMetric,
 		applicationDiskQuotaMbMetric:                applicationDiskQuotaMbMetric,
 		applicationsScrapesTotalMetric:              applicationsScrapesTotalMetric,
@@ -167,6 +180,7 @@ func (c ApplicationsCollector) Collect(ch chan<- prometheus.Metric) {
 func (c ApplicationsCollector) Describe(ch chan<- *prometheus.Desc) {
 	c.applicationInfoMetric.Describe(ch)
 	c.applicationInstancesMetric.Describe(ch)
+	c.applicationRunningInstancesMetric.Describe(ch)
 	c.applicationMemoryMbMetric.Describe(ch)
 	c.applicationDiskQuotaMbMetric.Describe(ch)
 	c.applicationsScrapesTotalMetric.Describe(ch)
@@ -179,6 +193,7 @@ func (c ApplicationsCollector) Describe(ch chan<- *prometheus.Desc) {
 func (c ApplicationsCollector) reportApplicationsMetrics(ch chan<- prometheus.Metric) error {
 	c.applicationInfoMetric.Reset()
 	c.applicationInstancesMetric.Reset()
+	c.applicationRunningInstancesMetric.Reset()
 	c.applicationMemoryMbMetric.Reset()
 	c.applicationDiskQuotaMbMetric.Reset()
 
@@ -258,8 +273,21 @@ func (c ApplicationsCollector) reportApplicationsMetrics(ch chan<- prometheus.Me
 		).Set(float64(application.DiskQuota))
 	}
 
+	for _, space := range spaces {
+		summary, _ := space.Summary()
+
+		for _, app := range summary.Apps {
+			c.applicationRunningInstancesMetric.WithLabelValues(
+				app.Guid,
+				app.Name,
+				app.State,
+			).Set(float64(app.RunningInstances))
+		}
+	}
+
 	c.applicationInfoMetric.Collect(ch)
 	c.applicationInstancesMetric.Collect(ch)
+	c.applicationRunningInstancesMetric.Collect(ch)
 	c.applicationMemoryMbMetric.Collect(ch)
 	c.applicationDiskQuotaMbMetric.Collect(ch)
 
